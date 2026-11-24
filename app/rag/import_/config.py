@@ -1,4 +1,6 @@
 # MinerU 模型版本配置（vlm = 视觉语言模型，适合PDF/图片高精度解析）
+from langchain_community.tools.steamship_image_generation.tool import SUPPORTED_IMAGE_SIZES
+
 MINERU_MODEL_VERSION = "vlm"
 
 # MinerU 任务轮询最大超时时间（单位：秒），超过则判定任务失败
@@ -9,4 +11,9 @@ MINERU_POLL_TIMEOUT_SECONDS = 600  #mineru的官网说：每一页pdf轮询最�
 MINERU_POLL_INTERVAL_SECONDS = 3
 
 # MinerU 文件下载超时时间（单位：秒），下载文件超过此时长则中断
-MINERU_DOWNLOAD_TIMEOUT_SECONDS = 30
+MINERU_DOWNLOAD_TIMEOUT_SECONDS = 600
+
+# 图片上下文的长度，约定100个字符
+IMAGE_CONTEXT_CHAR_LENGTH = 100
+
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg","jpeg",".png",".gif",".bmp",".webp"}

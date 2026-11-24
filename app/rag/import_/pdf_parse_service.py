@@ -6,6 +6,7 @@ from app.shared.runtime.logger import logger , PROJECT_ROOT
 from app.infra.config.providers import infra_config  ##infra_config是providers中的对象名
 from app.rag.import_.config import MINERU_MODEL_VERSION, MINERU_DOWNLOAD_TIMEOUT_SECONDS
 import requests
+import shutil  #全名为shell util， 是linux工具
 
 def validates_pdf_paths(state:ImportGraphState)  -> tuple[Path,Path]:
     # 3.1 从state中获取pdf_path和local_dir地址  ->str。pdf_path指的是某个具体pdf文件的路径，lcoal_dir指的是本地的一个文件夹的路径
@@ -102,10 +103,10 @@ def poll_mineru_zip_url(batch_id:str)  ->str:
     interval_time= MINERU_DOWNLOAD_TIMEOUT_SECONDS
     start_time   = time.time()  #时间秒
 
-    url = f"{infra_config.mineru_config.base_url}/extract-results/batch/{batch_id}"
+    url = f"{infra_config.mineru.base_url}/extract-results/batch/{batch_id}"
     header = {
         "Content-Type":"application/json",
-        "Authorization":f"Bearer{infra_config.mineru_config.api_key}"
+        "Authorization":f"Bearer {infra_config.mineru.api_key}"
     }
     # 6.2 死循环 while True:
     while True:
@@ -152,6 +153,77 @@ def poll_mineru_zip_url(batch_id:str)  ->str:
             #正在解析中
             logger.info(f"文件正在解析中，当前状态为{state},稍后重试")
 
+"""
+download_and_extract_md(zip_file_url:str,pdf不带后缀名的名称上stem:str) ->str:
+       7.1 向指定的zip下载地址发起请求(get) 响应字节数据(运行内存)
+       7.2 创建一个存储zip数据的文件 output / stem_result.zip
+       7.3 将字节数据写到zip的文件中 (write_bytes(date))
+       7.4 判断文件地址是否存在 output/  stem
+       7.5 存在先清空，删除
+       7.6 真是创建对应的文件夹   output  /  stem
+       7.7 zip文件解压到对应输出文件夹
+       7.8 检查输出文件夹中是否存在md文件  没有   -> 终止业务
+       7.9 检查md文件是否叫 stem.md ，是直接返回即可 Path -> str
+       7.10 再检查叫不叫full.md -> 重命名 -> 新地址返回
+       7.11 终止业务
+"""
+def download_and_extract_md(zip_url:str, local_dir_obj:Path, stem:str, zip_file_obj=None)->str:
+    # 7.1 向指定的zip下载地址发起请求(get) 响应字节数据(运行内存)
+    response = requests.get(zip_url,timeout=MINERU_DOWNLOAD_TIMEOUT_SECONDS)
+    status_code = response.status_code
+    if status_code != 200:
+        logger.error(f"从{zip_url}下载文件网络异常，状态码为：{status_code}，业务无法继续，提前终止！！")
+        raise RuntimeError(f"从{zip_url}下载文件重新网络异常，状态码为：{status_code}，业务无法继续，提前终止！！")
+    # 7.2 创建一个存储zip数据的文件 output / stem_result.zip
+    zip_file_path:Path = local_dir_obj / f"{stem}_result.zip"
+    # 7.3 将字节数据写到zip的文件中(write_bytes(date))
+    data = response.content
+    zip_file_path.write_bytes(data=data)
+    # 7.4 判断文件地址是否存在 output / stem
+    extract_dir:Path = local_dir_obj / stem
+    # 7.5 存在先清空，删除
+    if extract_dir.is_dir():
+        # 清空 本身和内容都清空
+        shutil.rmtree(extract_dir)  #递归删除 删除自己内部的文件，删除自己本身
+    # 7.6 真是创建对应的文件夹 output / stem
+    extract_dir.mkdir(parents=True,exist_ok=True)
+    # 7.7 zip文件解压到对应输出文件夹
+    # 参数1:要解压的文件 Path对象或者字符串对象
+    # 参数2：要解压到哪个文件夹地址  不要指定解压类型，自动识别
+    shutil.unpack_archive(zip_file_path,extract_dir)
+    # 参数1：压缩后的文件名 info
+    # 参数2：压缩后的格式 zip
+    # 参数3：压缩哪个文件夹
+    # shutil.make_archive() 这个是压缩方法
+
+    # 7.8 检查输出文件夹中是否存在md文件 没有   -> 终止业务
+    # 思路1:文件夹的文件都拿出来，比较后缀名 List[Path] = Path.iterdir()  ->获取文件夹下所有文件或者文件夹（不嵌套获取）
+    # 思路2：获取文件夹下指定的文件类型  Path.glob("*.md") ->不能嵌套取值 / rglob("*.md") ->可以嵌套取值
+    md_list:list[Path] = list(extract_dir.rglob("*.md"))
+    if not md_list:
+        logger.error(f"已经将文件解压到了{local_dir_obj}文件夹，但是内部没有md文件，业务无法继续，提前终止！！")
+        raise RuntimeError(f"已经将文件解压到了{local_dir_obj}文件夹，但是内部没有md文件，业务无法无法继续，提前终止！！")
+    # 7.9 检查md文件是否叫 stem.md ，是直接返回即可 Path -> str
+    for md_file in md_list:
+        if md_file.stem == stem:
+            logger.info(f"解压后直接存在原文件名({md_file.name})对应的md文件，无需重命名，直接返回即可！")
+            return str(md_file)
+
+    # 7.10 再检查叫不叫full.md -> 重命名 -> 新地址返回
+    target_md_obj:Path | None = None
+    for md_file in md_list:
+        if md_file.stem == "full":
+            target_md_obj = md_file
+            break
+    if target_md_obj:
+        new_md_obj:Path = target_md_obj.rename(target_md_obj.parent /f"{stem}.md")
+        logger.info(f"已经完成full.md重命名，新的文件地址为：{new_md_obj}~")
+        return str(new_md_obj)
+    else:
+    # 7.11 终止业务
+        logger.error(f"解压后的文件夹中存在{len(md_list)}个md文件，但是没有叫原文件名{stem}/full.md文件，也无法确定哪个文件，业务无法继续，提前终止！！")
+        raise RuntimeError(f"解压后的文件夹中存在{len(md_list)}个md文件，但是没有叫原文件名{stem}/full.md文件，也无法确定哪个文件，业务无法继续，提前终止！！")
+
 def parse_pdf_to_markdown(state: ImportGraphState) -> ImportGraphState:
 
     # 1. 进行参数合理性校验
@@ -162,5 +234,10 @@ def parse_pdf_to_markdown(state: ImportGraphState) -> ImportGraphState:
     upload_file_to_url(upload_file_url,pdf_path_obj)
     # 4.轮询获取解析结果
     full_zip_url:str = poll_mineru_zip_url(batch_id)
+    # 5.下载并解压和重命名文件
+    md_path:str = download_and_extract_md(full_zip_url,local_dir_obj,pdf_path_obj.stem)
+
+    #6.更新state  md_path
+    state["md_path"] = md_path
     return state
  # code 是业务逻辑状态码，MinerU 服务应用层定义的返回码。而 status_code 通常是网络协议层（HTTP）的状态码。status_code 告诉你 “请求是否成功到达了服务器”，而 code 告诉你 “服务器处理这个请求的结果是什么”。
