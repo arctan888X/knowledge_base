@@ -1,10 +1,19 @@
+import base64
+from mimetypes import guess_type
+
 from langchain_community.tools.steamship_image_generation.tool import SUPPORTED_IMAGE_SIZES
+from langchain_core.messages import HumanMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages import HumanMessage
+
 
 from app.process.import_.agent.state import ImportGraphState
 from pathlib import Path
 
 from app.rag.import_.config import IMAGE_CONTEXT_CHAR_LENGTH
 from app.shared.runtime.logger import logger
+from app.infra.llm.providers import llm_provider
+from app.shared.runtime.load_prompt import load_prompt
 import re
 
 """
@@ -77,10 +86,45 @@ def scan_iamges_info(images_path_obj: Path, md_content: str) -> list[tuple[str, 
     logger.info(f"已经完成了{len(images_info_list)}张图片内容的匹配！")
     return images_info_list
 
+def summary_image_info(image_info:list[tuple[str,Path,tuple[str,str]]],root_folder:str) -> dict[str,str]:
+    # 3.1 数据准备工作 初始化一个视觉模型对象  | 定义一个接受数据的字典
+    images_summary:dict[str,str] = {}
+    vision_model = llm_provider.vision_chat()
+    # 3.2 环处理每一张图片  for str,Path,context in list[tuple[str,Path,tuple[str,str]]]
+    for image_name,image_path_obj,image_context in image_info:
+        # 3.3 封装模型提示词信息
+        # 3.3.1 图片的描述 包裹上下文信息一段提示词
+        image_des :str = load_prompt("image_summary",image_context=image_context,root_folder=root_folder)
+        image_type:str = guess_type(image_name)[0]
+        image_base64:str = base64.b64decode(image_path_obj.read_bytes()).decode("utf-8")
+        message = HumanMessage(
+            content=[
+                {"type":"text","text":image_des},
+                {
+                    "type":"image_url",
+                    "image_url":{"url":f"data:{image_type};base64,{image_base64}"},
+                },
+            ]
+        )
+        # 3.4 封装调用链：直接model.invoke|调用链 提示词 |模型|解析器 OutParser()
+        chains = vision_model | StrOutputParser()
+        # 3.5 使用调用链进行调用和获取结果
+        summary:str = chains.invoke([message])
+        images_summary[image_name] = summary
+        logger.debug(f"图片:{image_name},已经通过视觉模型进行意图识别，结果为{summary}")
+
+
+
 
 def enrich_markdown_images(state: ImportGraphState) -> ImportGraphState:
     # 1.获取参数并且校验
     md_content, md_path_obj, images_path_obj = validates_and_get_data(state)
-    # 调用方法进行图片信息识别
+
+    if not list(images_path_obj.iterdir()):
+        logger.info(f"{md_path_obj}中没有引用任何图片，无需后续图片处理，直接跳转到下一个节点！！")
+        return state
+    # 2.调用方法进行图片信息识别
     images_info_list: list[tuple[str, Path, tuple[str, str]]] = scan_iamges_info(images_path_obj, md_content)
+    # 3.调用模型进行图片内容总结
+    images_summary:dict[str,str] = summary_image_info(images_info_list,md_path_obj.stem)
     return state
