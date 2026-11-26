@@ -35,3 +35,39 @@ if __name__ == "__main__":
         logger.info("开始本地测试 - MD图片处理全流程")
         result_state = node_md_img(test_state)
         logger.info(f"本地测试完成 - 处理结果状态: {result_state}")
+
+
+# if __name__ == "__main__":
+#     from pathlib import Path
+#
+#     test_dir = Path(
+#         r"E:\my work\PythonProject2\output\hak180使用说明书"
+#     )
+#
+#     # 在该目录及子目录中寻找 Markdown
+#     md_files = list(test_dir.rglob("*.md"))
+#
+#     if not md_files:
+#         raise FileNotFoundError(
+#             f"目录中没有找到 Markdown 文件：{test_dir}"
+#         )
+#
+#     print("找到以下 Markdown：")
+#     for md_file in md_files:
+#         print(f"  - {md_file}")
+#
+#     for index, md_path in enumerate(md_files, start=1):
+#         state = {
+#             "trace_id": f"test_hak180_{index}",
+#             "task_id": f"test_hak180_{index}",
+#             "md_path": str(md_path),
+#
+#             # 如果 ImportGraphState 要求这些字段，也一起保留
+#             "chunks": [],
+#         }
+#
+#         print(f"\n开始处理：{md_path}")
+#
+#         result = node_md_img(state)
+#
+#         print(f"处理完成：{result}")
