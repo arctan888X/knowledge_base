@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from app.shared.config.common import env_bool, env_str
 
-
 @dataclass
 class MinIOConfig:
     endpoint: str
